@@ -52,7 +52,13 @@
         }
 
         /* --- Camera Elements --- */
-        #video-input { display: none; }
+        /* Updated: Added playsinline attributes in HTML, ensure display is none but accessible */
+        #video-input { 
+            display: none; 
+            position: absolute; 
+            top: 0; 
+            left: 0; 
+        }
         
         #camera-preview {
             position: absolute;
@@ -426,7 +432,8 @@
     <div id="game-container">
         <canvas id="gameCanvas"></canvas>
         <canvas id="camera-preview"></canvas>
-        <video id="video-input"></video>
+        <!-- Added playsinline attributes is CRITICAL for mobile Safari/Chrome -->
+        <video id="video-input" playsinline webkit-playsinline muted autoplay></video>
 
         <div id="ui-layer">
             <div class="hud-top">
@@ -524,6 +531,7 @@
                 camLoading: "Initializing Camera... Please Wait",
                 camWaitHand: "Camera Active. Please show your hand...",
                 camReady: "✅ Hands Detected! Ready!",
+                camError: "Camera Error. Please check permissions.",
                 scoreLabel: "Score",
                 targetLabel: "Goal",
                 levelCleared: "🎉 Level Cleared!",
@@ -556,6 +564,7 @@
                 camLoading: "جار تهيئة الكاميرا... يرجى الانتظار",
                 camWaitHand: "الكاميرا نشطة. يرجى إظهار يدك...",
                 camReady: "✅ تم اكتشاف اليد! جاهز!",
+                camError: "خطأ في الكاميرا. يرجى التحقق من الأذونات.",
                 scoreLabel: "النقاط",
                 targetLabel: "الهدف",
                 levelCleared: "🎉 اكتمل المستوى!",
@@ -815,7 +824,7 @@
                     .catch(err => {
                         console.error(err);
                         camLoading.style.display = 'block';
-                        camLoadingText.innerText = "Error: Camera access denied.";
+                        camLoadingText.innerText = translations[currentLang].camError + " (" + err.name + ")";
                         cameraBtn.style.display = 'block';
                         cameraBtn.innerHTML = translations[currentLang].btnCamera;
                         cameraBtn.disabled = false;
