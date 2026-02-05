@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Fruit Ninja: AI Hand Tracking</title>
     
     <!-- MediaPipe Libraries -->
@@ -12,23 +12,25 @@
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
 
     <style>
-        body {
+        /* --- CORE LAYOUT FIXES FOR MOBILE --- */
+        html, body {
             margin: 0;
-            overflow: hidden;
-            /* Default wood texture gradient */
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden; /* Disable scrolling completely */
+            position: fixed;  /* Lock viewport to prevent rubber-banding on iOS */
             background: radial-gradient(circle, #4a3b32 0%, #2d241e 100%);
             background-size: cover;
-            background-position: center;
-            background-repeat: no-repeat;
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            touch-action: none;
+            touch-action: none; /* Disable browser touch gestures */
             user-select: none;
             -webkit-user-select: none;
         }
 
-        /* RTL Support for Arabic */
+        /* RTL Support */
         html[dir="rtl"] body {
-            font-family: 'Segoe UI', Tahoma, 'Arial', sans-serif; /* Arabic fonts */
+            font-family: 'Segoe UI', Tahoma, 'Arial', sans-serif;
         }
 
         #gameCanvas {
@@ -39,9 +41,7 @@
         }
 
         /* --- Camera Elements --- */
-        #video-input {
-            display: none; /* Hide raw video */
-        }
+        #video-input { display: none; }
         
         #camera-preview {
             position: absolute;
@@ -53,15 +53,14 @@
             border: 2px solid #fff;
             border-radius: 8px;
             z-index: 50;
-            transform: scaleX(-1); /* Mirror effect */
+            transform: scaleX(-1);
             background: #000;
-            display: none; /* Hidden by default */
+            display: none;
             opacity: 0.7;
             box-shadow: 0 0 10px rgba(0, 255, 255, 0.3);
-            pointer-events: none; /* Let clicks pass through */
+            pointer-events: none;
         }
         
-        /* RTL: Mirror camera position */
         html[dir="rtl"] #camera-preview {
             left: 10px;
             right: auto;
@@ -96,6 +95,37 @@
             display: flex;
             flex-direction: column;
             gap: 5px;
+            margin-top: 40px; /* Default margin for Portrait */
+            transition: margin-top 0.3s;
+        }
+
+        /* --- LANDSCAPE ADAPTATION --- */
+        /* Automatically adjust layout when screen is wider than tall */
+        @media (orientation: landscape) {
+            .hud-column {
+                margin-top: 5px !important; /* Move HUD up in landscape */
+            }
+            .hud-column:last-child { /* Lives container */
+                margin-top: 5px !important;
+            }
+            #timer {
+                margin-top: 0px !important;
+                font-size: 24px; /* Smaller timer */
+            }
+            #camera-preview {
+                width: 80px; /* Smaller camera preview */
+                height: 60px;
+                top: 5px;
+                right: 5px;
+            }
+            .lang-switch {
+                top: 5px !important;
+                left: 5px !important;
+            }
+            .lang-btn {
+                padding: 2px 8px; /* Smaller buttons */
+                font-size: 12px;
+            }
         }
 
         .level-badge {
@@ -239,7 +269,6 @@
             box-shadow: none;
         }
 
-        /* Home Button Style */
         .btn-home {
             margin-top: 15px; 
             background: linear-gradient(45deg, #4facfe 0%, #00f2fe 100%);
@@ -370,7 +399,6 @@
         <h2>Please Rotate Your Device</h2>
         <p>This game is best played in landscape mode.</p>
         <p>请旋转手机以横屏游玩</p>
-        <!-- Replaced "Unlock" with "Enter Landscape" button -->
         <button id="enter-landscape-btn" class="lock-btn">Enter Landscape / 进入横屏</button>
     </div>
 
@@ -382,7 +410,7 @@
 
     <div id="ui-layer">
         <div class="hud-top">
-            <div class="hud-column" style="margin-top: 40px;">
+            <div class="hud-column">
                 <div class="level-badge" id="level-badge">Level 1</div>
                 <div class="score-box">
                     <span data-t="scoreLabel">Score</span>: 
@@ -392,7 +420,7 @@
             
             <div class="timer-box" id="timer" style="margin-top: 10px;">60</div>
 
-            <div class="hud-column" style="align-items: flex-end; margin-top: 40px;">
+            <div class="hud-column" style="align-items: flex-end;">
                 <div class="lives-box" id="lives">❤️❤️❤️</div>
             </div>
         </div>
