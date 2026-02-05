@@ -1,0 +1,1250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Fruit Ninja: AI Hand Tracking</title>
+    
+    <!-- MediaPipe Libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+    <style>
+        /* --- CORE LAYOUT FIXES FOR MOBILE --- */
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden; /* Disable scrolling completely */
+            position: fixed;  /* Lock viewport to prevent rubber-banding on iOS */
+            background: radial-gradient(circle, #4a3b32 0%, #2d241e 100%);
+            background-size: cover;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            touch-action: none; /* Disable browser touch gestures */
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        /* RTL Support */
+        html[dir="rtl"] body {
+            font-family: 'Segoe UI', Tahoma, 'Arial', sans-serif;
+        }
+
+        #gameCanvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            background-color: transparent;
+        }
+
+        /* --- Camera Elements --- */
+        #video-input { display: none; }
+        
+        #camera-preview {
+            position: absolute;
+            top: 10px;      
+            right: 10px;    
+            left: auto;     
+            width: 100px;   
+            height: 75px;   
+            border: 2px solid #fff;
+            border-radius: 8px;
+            z-index: 50;
+            transform: scaleX(-1);
+            background: #000;
+            display: none;
+            opacity: 0.7;
+            box-shadow: 0 0 10px rgba(0, 255, 255, 0.3);
+            pointer-events: none;
+        }
+        
+        html[dir="rtl"] #camera-preview {
+            left: 10px;
+            right: auto;
+        }
+
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            z-index: 10;
+        }
+
+        .hud-top {
+            padding: 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            color: white;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+            width: 100%;
+            box-sizing: border-box;
+            background: linear-gradient(to bottom, rgba(0,0,0,0.6), transparent);
+        }
+
+        .hud-column {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            margin-top: 40px; /* Default margin for Portrait */
+            transition: margin-top 0.3s;
+        }
+
+        /* --- LANDSCAPE ADAPTATION --- */
+        /* Automatically adjust layout when screen is wider than tall */
+        @media (orientation: landscape) {
+            .hud-column {
+                margin-top: 5px !important; /* Move HUD up in landscape */
+            }
+            .hud-column:last-child { /* Lives container */
+                margin-top: 5px !important;
+            }
+            #timer {
+                margin-top: 0px !important;
+                font-size: 24px; /* Smaller timer */
+            }
+            #camera-preview {
+                width: 80px; /* Smaller camera preview */
+                height: 60px;
+                top: 5px;
+                right: 5px;
+            }
+            .lang-switch {
+                top: 5px !important;
+                left: 5px !important;
+            }
+            .lang-btn {
+                padding: 2px 8px; /* Smaller buttons */
+                font-size: 12px;
+            }
+        }
+
+        .level-badge {
+            background: #ff00de;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 18px;
+            font-weight: bold;
+            box-shadow: 0 0 10px rgba(255, 0, 222, 0.5);
+            margin-bottom: 5px;
+            display: inline-block;
+        }
+
+        .score-box { font-size: 24px; font-weight: bold; }
+        .score-box span { color: #ffd700; }
+        
+        .target-box { font-size: 16px; color: #aaa; font-weight: bold; }
+
+        .timer-box {
+            font-size: 32px;
+            font-weight: bold;
+            color: #fff;
+            background: rgba(0,0,0,0.3);
+            padding: 5px 15px;
+            border-radius: 10px;
+            border: 2px solid rgba(255,255,255,0.2);
+        }
+        .timer-box.warning { color: #ff4444; animation: pulse 1s infinite; }
+
+        .lives-box { font-size: 24px; letter-spacing: 5px; }
+
+        .screen-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.85);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            pointer-events: auto;
+            transition: opacity 0.3s;
+            z-index: 20;
+            backdrop-filter: blur(5px);
+        }
+
+        /* --- Orientation Lock --- */
+        #orientation-lock {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: #111;
+            z-index: 10000;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            text-align: center;
+        }
+        
+        .rotate-icon {
+            font-size: 50px;
+            animation: rotate-anim 2s infinite ease-in-out;
+            margin-bottom: 20px;
+        }
+
+        .lock-btn {
+            margin-top: 25px;
+            padding: 10px 25px;
+            background: transparent;
+            border: 1px solid rgba(255,255,255,0.5);
+            color: #aaa;
+            border-radius: 30px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .lock-btn:hover {
+            border-color: #fff;
+            color: #fff;
+            background: rgba(255,255,255,0.1);
+        }
+
+        @keyframes rotate-anim {
+            0% { transform: rotate(0deg); }
+            50% { transform: rotate(90deg); }
+            100% { transform: rotate(0deg); }
+        }
+
+        /* Show lock screen only in portrait */
+        @media screen and (orientation: portrait) {
+            #orientation-lock { display: flex; }
+        }
+
+        h1 {
+            color: white;
+            font-size: 42px;
+            margin: 0 0 10px 0;
+            text-shadow: 0 0 10px #ff00de, 0 0 20px #ff00de;
+            text-align: center;
+        }
+
+        h2 {
+            color: #ffd700;
+            font-size: 28px;
+            margin: 0 0 20px 0;
+        }
+
+        p {
+            color: #ddd;
+            font-size: 18px;
+            margin-bottom: 30px;
+            text-align: center;
+            max-width: 80%;
+            line-height: 1.5;
+        }
+
+        .btn {
+            background: linear-gradient(45deg, #ff9a9e 0%, #fad0c4 99%, #fad0c4 100%);
+            border: none;
+            padding: 15px 50px;
+            font-size: 24px;
+            border-radius: 50px;
+            cursor: pointer;
+            color: #fff;
+            font-weight: bold;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.4);
+            transition: transform 0.1s;
+            text-transform: uppercase;
+            outline: none;
+            margin-top: 10px;
+        }
+        .btn:active { transform: scale(0.95); }
+        .btn:disabled {
+            background: #555;
+            color: #888;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .btn-home {
+            margin-top: 15px; 
+            background: linear-gradient(45deg, #4facfe 0%, #00f2fe 100%);
+        }
+
+        .hidden {
+            display: none !important;
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+            100% { transform: scale(1); }
+        }
+
+        @keyframes shake {
+            0% { transform: translate(1px, 1px) rotate(0deg); }
+            10% { transform: translate(-1px, -2px) rotate(-1deg); }
+            20% { transform: translate(-3px, 0px) rotate(1deg); }
+            30% { transform: translate(3px, 2px) rotate(0deg); }
+            40% { transform: translate(1px, -1px) rotate(1deg); }
+            50% { transform: translate(-1px, 2px) rotate(-1deg); }
+            60% { transform: translate(-3px, 1px) rotate(0deg); }
+            70% { transform: translate(3px, 1px) rotate(-1deg); }
+            80% { transform: translate(-1px, -1px) rotate(1deg); }
+            90% { transform: translate(1px, 2px) rotate(0deg); }
+            100% { transform: translate(1px, -2px) rotate(-1deg); }
+        }
+        .shake-effect { animation: shake 0.5s; }
+
+        .mission-info {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            text-align: center;
+            border: 1px solid rgba(255,255,255,0.2);
+            min-width: 280px;
+        }
+        .mission-item {
+            color: #fff;
+            font-size: 18px;
+            margin: 5px 0;
+        }
+        .mission-val { color: #ffd700; font-weight: bold; }
+
+        .tutorial-box {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        .t-item {
+            background: rgba(0,0,0,0.5);
+            padding: 10px 15px;
+            border-radius: 8px;
+            border: 1px solid #444;
+            color: #ddd;
+            font-size: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .t-icon { font-size: 24px; }
+
+        /* --- Language Switcher --- */
+        .lang-switch {
+            position: absolute;
+            top: 10px;
+            left: 10px; 
+            right: auto;
+            z-index: 100;
+            display: flex;
+            gap: 10px;
+        }
+        .lang-btn {
+            background: rgba(0,0,0,0.5);
+            border: 1px solid white;
+            color: white;
+            padding: 5px 10px;
+            cursor: pointer;
+            border-radius: 5px;
+            font-weight: bold;
+        }
+        .lang-btn.active {
+            background: #ff00de;
+            border-color: #ff00de;
+        }
+        
+        html[dir="rtl"] .lang-switch {
+            right: 10px;
+            left: auto;
+        }
+
+        /* Loading Spinner */
+        #cam-loading {
+            display: none;
+            color: #00ffff;
+            font-weight: bold;
+            margin-top: 20px;
+            font-size: 18px;
+            text-shadow: 0 0 5px #00ffff;
+        }
+        .spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255,255,255,0.3);
+            border-radius: 50%;
+            border-top-color: #fff;
+            animation: spin 1s ease-in-out infinite;
+            margin-right: 10px;
+            vertical-align: middle;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Orientation Lock Screen -->
+    <div id="orientation-lock">
+        <div class="rotate-icon">📱 ↻</div>
+        <h2>Please Rotate Your Device</h2>
+        <p>This game is best played in landscape mode.</p>
+        <p>请旋转手机以横屏游玩</p>
+        <button id="enter-landscape-btn" class="lock-btn">Enter Landscape / 进入横屏</button>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+    
+    <!-- Camera Preview Canvas (Mirrored) -->
+    <canvas id="camera-preview"></canvas>
+    <video id="video-input"></video>
+
+    <div id="ui-layer">
+        <div class="hud-top">
+            <div class="hud-column">
+                <div class="level-badge" id="level-badge">Level 1</div>
+                <div class="score-box">
+                    <span data-t="scoreLabel">Score</span>: 
+                    <span id="score-val">0</span> / <span id="target-val">100</span>
+                </div>
+            </div>
+            
+            <div class="timer-box" id="timer" style="margin-top: 10px;">60</div>
+
+            <div class="hud-column" style="align-items: flex-end;">
+                <div class="lives-box" id="lives">❤️❤️❤️</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Menu -->
+    <div id="menu-screen" class="screen-overlay">
+        <!-- Language Switcher -->
+        <div class="lang-switch">
+            <button class="lang-btn active" onclick="setLang('en')">English</button>
+            <button class="lang-btn" onclick="setLang('ar')">العربية</button>
+        </div>
+
+        <h1 data-t="gameTitle">🍉 Fruit Ninja 🥝</h1>
+        <h2 data-t="gameSubtitle">Challenge Mode</h2>
+        
+        <div class="tutorial-box">
+            <div class="t-item"><span class="t-icon">🍎</span> <span data-t="tutSlice">Slice fruits</span></div>
+            <div class="t-item"><span class="t-icon">💣</span> <span data-t="tutBomb">Bombs hurt</span></div>
+            <div class="t-item"><span class="t-icon">⏳</span> <span data-t="tutTime">Beat the timer</span></div>
+        </div>
+
+        <div class="mission-info">
+            <p style="margin:0; font-size: 20px; color: #fff;" data-t="readyMsg">Ready for the challenge?</p>
+            <p style="margin:5px 0 0 0; font-size: 16px; color: #ffd700;">
+                <span data-t="levelLabel">Level 1 Goal</span>: <span id="menu-target">100</span> <span data-t="pointsLabel">Points</span>
+            </p>
+        </div>
+        
+        <div id="cam-loading">
+            <div class="spinner"></div><span id="cam-loading-text" data-t="camLoading">Initializing Camera... Please Wait</span>
+        </div>
+
+        <button id="start-btn" class="btn" data-t="btnStart">Start Game</button>
+        
+        <button id="camera-btn" class="btn" style="margin-top:15px; background:linear-gradient(45deg, #11998e, #38ef7d); font-size: 18px;" data-t="btnCamera">📷 Enable Camera Control</button>
+    </div>
+
+    <!-- Level Clear Screen -->
+    <div id="level-clear-screen" class="screen-overlay hidden">
+        <h1 style="color:#4dff4d; text-shadow:0 0 20px #4dff4d;" data-t="levelCleared">🎉 Level Cleared!</h1>
+        <div class="mission-info">
+            <div class="mission-item"><span data-t="nextLevel">Next Level</span>: <span class="mission-val" id="next-level-num">2</span></div>
+            <div class="mission-item"><span data-t="targetScore">Goal</span>: <span class="mission-val" id="next-target">150</span> <span data-t="pointsLabel">Pts</span></div>
+            <div class="mission-item"><span data-t="timeLimit">Time</span>: <span class="mission-val" id="next-time">60s</span></div>
+        </div>
+        <button id="next-level-btn" class="btn" data-t="btnNext">Next Level</button>
+        <button id="level-home-btn" class="btn btn-home" data-t="btnHome">Home</button>
+    </div>
+
+    <!-- Game Over Screen -->
+    <div id="game-over-screen" class="screen-overlay hidden">
+        <h1 style="color:#ff4444;" data-t="gameOver">Game Over</h1>
+        <p><span data-t="reachedLevel">You reached</span> <span id="final-level" style="color:#fff; font-weight:bold;">Level 1</span></p>
+        <p><span data-t="levelScore">Level Score</span>: <span id="final-score" style="color:#ffd700; font-weight:bold;">0</span></p>
+        <button id="restart-btn" class="btn" data-t="btnTryAgain">Try Again</button>
+        <button id="home-btn" class="btn btn-home" data-t="btnHome">Home</button>
+    </div>
+
+    <!-- Victory Screen -->
+    <div id="victory-screen" class="screen-overlay hidden">
+        <h1 style="font-size: 56px;" data-t="victory">🏆 Victory! 🏆</h1>
+        <p data-t="victoryMsg">All 10 levels completed!<br>You are a true Fruit Master!</p>
+        <button id="victory-btn" class="btn" data-t="btnPlayAgain">Play Again</button>
+    </div>
+
+    <script>
+        const translations = {
+            en: {
+                gameTitle: "🍉 Fruit Ninja 🥝",
+                gameSubtitle: "Zen Mode",
+                tutSlice: "Slice fruits",
+                tutBomb: "Bombs hurt",
+                tutTime: "Beat the timer",
+                readyMsg: "Ready for the challenge?",
+                levelLabel: "Level 1 Goal",
+                pointsLabel: "Points",
+                startMsg: "Start from Level 1",
+                btnStart: "Start Game",
+                btnCamera: "📷 Enable Camera Control",
+                camLoading: "Initializing Camera... Please Wait",
+                camWaitHand: "Camera Active. Please show your hand...",
+                camReady: "✅ Hands Detected! Ready!",
+                scoreLabel: "Score",
+                targetLabel: "Goal",
+                levelCleared: "🎉 Level Cleared!",
+                nextLevel: "Next Level",
+                targetScore: "Goal",
+                timeLimit: "Time",
+                btnNext: "Next Level",
+                gameOver: "Game Over",
+                reachedLevel: "You reached",
+                levelScore: "Final Score",
+                btnTryAgain: "Try Again",
+                btnHome: "Home",
+                victory: "🏆 Victory! 🏆",
+                victoryMsg: "All 10 levels completed!<br>You are a true Fruit Master!",
+                btnPlayAgain: "Play Again",
+                levelPrefix: "Level"
+            },
+            ar: {
+                gameTitle: "🍉 نينجا الفواكه 🥝",
+                gameSubtitle: "وضع الزن",
+                tutSlice: "قطع الفواكه",
+                tutBomb: "احذر القنابل",
+                tutTime: "اسبق الوقت",
+                readyMsg: "هل أنت مستعد للتحدي؟",
+                levelLabel: "هدف المستوى 1",
+                pointsLabel: "نقاط",
+                startMsg: "ابدأ من المستوى 1",
+                btnStart: "ابدأ اللعبة",
+                btnCamera: "📷 تمكين التحكم بالكاميرا",
+                camLoading: "جار تهيئة الكاميرا... يرجى الانتظار",
+                camWaitHand: "الكاميرا نشطة. يرجى إظهار يدك...",
+                camReady: "✅ تم اكتشاف اليد! جاهز!",
+                scoreLabel: "النقاط",
+                targetLabel: "الهدف",
+                levelCleared: "🎉 اكتمل المستوى!",
+                nextLevel: "المستوى التالي",
+                targetScore: "الهدف",
+                timeLimit: "الوقت",
+                btnNext: "المستوى التالي",
+                gameOver: "انتهت اللعبة",
+                reachedLevel: "وصلت إلى",
+                levelScore: "النتيجة النهائية",
+                btnTryAgain: "حاول مرة أخرى",
+                btnHome: "القائمة الرئيسية",
+                victory: "🏆 نصر! 🏆",
+                victoryMsg: "أكملت جميع المستويات العشرة!<br>أنت سيد الفواكه الحقيقي!",
+                btnPlayAgain: "العب مرة أخرى",
+                levelPrefix: "مستوى"
+            }
+        };
+
+        let currentLang = 'en';
+
+        (function() {
+            const levels = [
+                { id: 1,  duration: 45, target: 100, spawnRate: 90, bombChance: 0.0,  
+                  msg: { en: "Warm-up: No bombs!", ar: "إحماء: لا توجد قنابل!" } },
+                { id: 2,  duration: 45, target: 150, spawnRate: 85, bombChance: 0.05, 
+                  msg: { en: "Caution: Bombs ahead!", ar: "تحذير: احذر القنابل!" } },
+                { id: 3,  duration: 40, target: 200, spawnRate: 80, bombChance: 0.10, 
+                  msg: { en: "Speed up: Be quick!", ar: "أسرع: كن سريعاً!" } },
+                { id: 4,  duration: 40, target: 250, spawnRate: 75, bombChance: 0.15, 
+                  msg: { en: "Challenge: Fast hands!", ar: "تحدي: أيدي سريعة!" } },
+                { id: 5,  duration: 35, target: 300, spawnRate: 70, bombChance: 0.20, 
+                  msg: { en: "Halfway: Stay focused", ar: "منتصف الطريق: ركز جيداً" } },
+                { id: 6,  duration: 35, target: 350, spawnRate: 65, bombChance: 0.22, 
+                  msg: { en: "Chaos: Fruit rain!", ar: "فوضى: مطر الفواكه!" } },
+                { id: 7,  duration: 30, target: 300, spawnRate: 60, bombChance: 0.25, 
+                  msg: { en: "Pressure: Time is tight", ar: "ضغط: الوقت ضيق" } },
+                { id: 8,  duration: 30, target: 350, spawnRate: 55, bombChance: 0.28, 
+                  msg: { en: "Crazy: Bomb crisis", ar: "جنون: أزمة قنابل" } },
+                { id: 9,  duration: 25, target: 300, spawnRate: 50, bombChance: 0.30, 
+                  msg: { en: "Extreme: Don't blink", ar: "قصوى: لا ترمش" } },
+                { id: 10, duration: 25, target: 400, spawnRate: 40, bombChance: 0.35, 
+                  msg: { en: "Final Trial: Glory!", ar: "الاختبار النهائي: المجد!" } }
+            ];
+
+            const config = {
+                gravity: 0.08, 
+                bladeColor: '#00ffff',
+                bladeWidth: 6,
+                bladeLife: 20, 
+                maxLives: 3
+            };
+
+            const fruitsData = [
+                { emoji: '🍉', color: '#ff4d4d', points: 10 },
+                { emoji: '🍊', color: '#ffa500', points: 10 },
+                { emoji: '🍋', color: '#ffff00', points: 10 },
+                { emoji: '🥝', color: '#8ce600', points: 15 },
+                { emoji: '🥥', color: '#e6e6e6', points: 20 },
+                { emoji: '🍎', color: '#ff0000', points: 10 },
+                { emoji: '🍇', color: '#800080', points: 15 }
+            ];
+            const bombData = { emoji: '💣', color: '#333' };
+
+            const canvas = document.getElementById('gameCanvas');
+            const ctx = canvas.getContext('2d');
+            
+            const scoreValEl = document.getElementById('score-val');
+            const targetValEl = document.getElementById('target-val');
+            const livesEl = document.getElementById('lives');
+            const timerEl = document.getElementById('timer');
+            const levelBadgeEl = document.getElementById('level-badge');
+
+            const menuScreen = document.getElementById('menu-screen');
+            const levelClearScreen = document.getElementById('level-clear-screen');
+            const gameOverScreen = document.getElementById('game-over-screen');
+            const victoryScreen = document.getElementById('victory-screen');
+            const menuTargetEl = document.getElementById('menu-target');
+            
+            const finalScoreEl = document.getElementById('final-score');
+            const finalLevelEl = document.getElementById('final-level');
+            const nextLevelNumEl = document.getElementById('next-level-num');
+            const nextTargetEl = document.getElementById('next-target');
+            const nextTimeEl = document.getElementById('next-time');
+
+            const startBtn = document.getElementById('start-btn');
+            const nextLevelBtn = document.getElementById('next-level-btn');
+            const restartBtn = document.getElementById('restart-btn');
+            const homeBtn = document.getElementById('home-btn');
+            const levelHomeBtn = document.getElementById('level-home-btn'); 
+            const victoryBtn = document.getElementById('victory-btn');
+            const enterLandscapeBtn = document.getElementById('enter-landscape-btn');
+            const orientationLockDiv = document.getElementById('orientation-lock');
+
+            const videoInput = document.getElementById('video-input');
+            const cameraPreview = document.getElementById('camera-preview');
+            const cameraBtn = document.getElementById('camera-btn');
+            const camLoading = document.getElementById('cam-loading');
+            const camLoadingText = document.getElementById('cam-loading-text');
+            const previewCtx = cameraPreview.getContext('2d');
+
+            let width, height;
+            let currentLevelIndex = 0; 
+            let currentLevelData = levels[0];
+            
+            let gameRunning = false;
+            let isVictory = false; 
+            let score = 0;
+            let lives = 3;
+            let frameCount = 0;
+            let timeLeft = 0;
+            
+            let timerInterval = null;
+            let animationId = null;
+
+            let entities = [];
+            let particles = [];
+            let bladePath = [];
+            
+            let isCameraActive = false;
+            let isHandDetected = false;
+            let handResults = null;
+            let hands = null;
+            let camera = null;
+
+            if (enterLandscapeBtn) {
+                enterLandscapeBtn.addEventListener('click', async (e) => {
+                    e.stopPropagation();
+                    try {
+                        if (document.documentElement.requestFullscreen) {
+                            await document.documentElement.requestFullscreen();
+                        } else if (document.documentElement.webkitRequestFullscreen) {
+                            await document.documentElement.webkitRequestFullscreen();
+                        }
+                        if (screen.orientation && screen.orientation.lock) {
+                            await screen.orientation.lock('landscape');
+                        }
+                        orientationLockDiv.style.display = 'none';
+                    } catch (err) {
+                        console.error("Landscape lock failed:", err);
+                        alert("无法自动切换，请手动关闭屏幕旋转锁定并横置手机。\nAuto-rotate failed. Please disable orientation lock manually.");
+                    }
+                });
+            }
+
+            window.setLang = function(lang) {
+                currentLang = lang;
+                document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr';
+                document.documentElement.lang = lang;
+                document.querySelectorAll('[data-t]').forEach(el => {
+                    const key = el.getAttribute('data-t');
+                    if(translations[lang][key]) {
+                        el.innerHTML = translations[lang][key];
+                    }
+                });
+                document.querySelectorAll('.lang-btn').forEach(btn => {
+                    btn.classList.remove('active');
+                    if(btn.textContent.includes(lang === 'en' ? 'English' : 'العربية')) {
+                        btn.classList.add('active');
+                    }
+                });
+                if (currentLevelData) {
+                    const prefix = translations[lang].levelPrefix;
+                    levelBadgeEl.innerText = `${prefix} ${currentLevelData.id}`;
+                }
+            };
+
+            function resize() {
+                width = canvas.width = window.innerWidth;
+                height = canvas.height = window.innerHeight;
+            }
+            window.addEventListener('resize', resize);
+            resize();
+
+            window.setLang('en');
+            menuTargetEl.innerText = levels[0].target;
+
+            function onResults(results) {
+                handResults = results;
+                if (isCameraActive) {
+                    cameraPreview.width = videoInput.videoWidth;
+                    cameraPreview.height = videoInput.videoHeight;
+                    previewCtx.save();
+                    previewCtx.clearRect(0, 0, cameraPreview.width, cameraPreview.height);
+                    previewCtx.drawImage(results.image, 0, 0, cameraPreview.width, cameraPreview.height);
+                    if (results.multiHandLandmarks) {
+                        for (const landmarks of results.multiHandLandmarks) {
+                            drawConnectors(previewCtx, landmarks, HAND_CONNECTIONS, {color: '#00FF00', lineWidth: 5});
+                            drawLandmarks(previewCtx, landmarks, {color: '#FF0000', lineWidth: 2});
+                        }
+                    }
+                    previewCtx.restore();
+                }
+
+                if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                    if (isCameraActive && !isHandDetected) {
+                        isHandDetected = true;
+                        startBtn.style.display = 'block';
+                        camLoading.style.display = 'none';
+                        cameraBtn.innerHTML = translations[currentLang].camReady;
+                    }
+
+                    if (gameRunning) {
+                        const landmarks = results.multiHandLandmarks[0];
+                        const indexTip = landmarks[8];
+                        const x = (1 - indexTip.x) * width;
+                        const y = indexTip.y * height;
+                        addPathPoint(x, y);
+                    }
+                }
+            }
+
+            function initCamera() {
+                camLoading.style.display = 'block';
+                camLoadingText.innerText = translations[currentLang].camLoading;
+                cameraBtn.style.display = 'none';
+                startBtn.style.display = 'none';
+
+                hands = new Hands({locateFile: (file) => {
+                    return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+                }});
+
+                hands.setOptions({
+                    maxNumHands: 1,
+                    modelComplexity: 0, 
+                    minDetectionConfidence: 0.5,
+                    minTrackingConfidence: 0.5
+                });
+
+                hands.onResults(onResults);
+
+                camera = new Camera(videoInput, {
+                    onFrame: async () => {
+                        await hands.send({image: videoInput});
+                    },
+                    width: 480, 
+                    height: 360
+                });
+
+                camera.start()
+                    .then(() => {
+                        isCameraActive = true;
+                        cameraPreview.style.display = 'block';
+                        camLoadingText.innerText = translations[currentLang].camWaitHand;
+                        cameraBtn.style.display = 'block';
+                        cameraBtn.innerHTML = "✋ Show Hand to Start";
+                        cameraBtn.style.background = "#333";
+                        cameraBtn.disabled = true;
+                        console.log("Camera started");
+                    })
+                    .catch(err => {
+                        console.error(err);
+                        camLoading.style.display = 'block';
+                        camLoadingText.innerText = "Error: Camera access denied.";
+                        cameraBtn.style.display = 'block';
+                        cameraBtn.innerHTML = translations[currentLang].btnCamera;
+                        cameraBtn.disabled = false;
+                        startBtn.style.display = 'block'; 
+                    });
+            }
+
+            cameraBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (!isCameraActive) {
+                    initCamera();
+                }
+            });
+
+            class Point {
+                constructor(x, y) { 
+                    this.x = x; 
+                    this.y = y; 
+                    this.life = config.bladeLife; 
+                }
+            }
+
+            class Particle {
+                constructor(x, y, color, speed, size, isText = false, text = '') {
+                    this.x = x; this.y = y;
+                    const angle = Math.random() * Math.PI * 2;
+                    this.vx = Math.cos(angle) * speed;
+                    this.vy = Math.sin(angle) * speed;
+                    this.color = color;
+                    this.alpha = 1;
+                    this.decay = Math.random() * 0.02 + 0.015;
+                    this.gravity = 0.15;
+                    this.size = size;
+                    this.isText = isText;
+                    this.text = text;
+                }
+                update() {
+                    this.x += this.vx;
+                    this.y += this.vy;
+                    this.vy += this.gravity;
+                    this.alpha -= this.decay;
+                }
+                draw() {
+                    ctx.globalAlpha = Math.max(0, this.alpha);
+                    if (this.isText) {
+                        ctx.font = `bold ${this.size}px Arial`;
+                        ctx.fillStyle = this.color;
+                        ctx.fillText(this.text, this.x, this.y);
+                    } else {
+                        ctx.fillStyle = this.color;
+                        ctx.beginPath();
+                        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                    ctx.globalAlpha = 1;
+                }
+            }
+
+            class Entity {
+                constructor() {
+                    this.radius = 45; 
+                    this.rotation = 0;
+                    this.rotationSpeed = (Math.random() - 0.5) * 0.2; 
+                    this.active = true;
+                    this.sliced = false;
+
+                    const rand = Math.random();
+                    const g = config.gravity;
+                    const h = height;
+                    const w = width;
+
+                    let spawnX, spawnY, velocityX, velocityY;
+
+                    if (rand < 0.30) {
+                        spawnX = -this.radius;
+                        spawnY = h * (0.5 + Math.random() * 0.4); 
+                        const targetPeakY = h * (0.1 + Math.random() * 0.2); 
+                        const heightDelta = spawnY - targetPeakY;
+                        velocityY = -Math.sqrt(2 * g * heightDelta);
+                        const airTime = 2 * (Math.abs(velocityY) / g);
+                        velocityX = (w * (0.5 + Math.random() * 0.3)) / airTime;
+
+                    } else if (rand < 0.45) {
+                        spawnX = -this.radius;
+                        spawnY = h * (0.5 + Math.random() * 0.4);
+                        const targetPeakY = -h * (0.1 + Math.random() * 0.2);
+                        const heightDelta = spawnY - targetPeakY;
+                        velocityY = -Math.sqrt(2 * g * heightDelta);
+                        const airTime = 2 * (Math.abs(velocityY) / g);
+                        velocityX = (w * (0.6 + Math.random() * 0.4)) / airTime;
+
+                    } else if (rand < 0.75) {
+                        spawnX = w + this.radius;
+                        spawnY = h * (0.5 + Math.random() * 0.4);
+                        const targetPeakY = h * (0.1 + Math.random() * 0.2);
+                        const heightDelta = spawnY - targetPeakY;
+                        velocityY = -Math.sqrt(2 * g * heightDelta);
+                        const airTime = 2 * (Math.abs(velocityY) / g);
+                        velocityX = -(w * (0.5 + Math.random() * 0.3)) / airTime;
+
+                    } else if (rand < 0.90) {
+                        spawnX = w + this.radius;
+                        spawnY = h * (0.5 + Math.random() * 0.4);
+                        const targetPeakY = -h * (0.1 + Math.random() * 0.2);
+                        const heightDelta = spawnY - targetPeakY;
+                        velocityY = -Math.sqrt(2 * g * heightDelta);
+                        const airTime = 2 * (Math.abs(velocityY) / g);
+                        velocityX = -(w * (0.6 + Math.random() * 0.4)) / airTime;
+
+                    } else {
+                        spawnX = w * (0.2 + Math.random() * 0.6);
+                        spawnY = h + this.radius;
+                        const targetPeakY = h * (0.15 + Math.random() * 0.2);
+                        const heightDelta = spawnY - targetPeakY;
+                        velocityY = -Math.sqrt(2 * g * heightDelta);
+                        velocityX = (Math.random() - 0.5) * 4;
+                    }
+
+                    this.x = spawnX;
+                    this.y = spawnY;
+                    this.vx = velocityX;
+                    this.vy = velocityY;
+
+                    const isBomb = Math.random() < currentLevelData.bombChance;
+                    if (isBomb) {
+                        this.type = 'bomb';
+                        this.data = bombData;
+                    } else {
+                        this.type = 'fruit';
+                        this.data = fruitsData[Math.floor(Math.random() * fruitsData.length)];
+                    }
+                }
+
+                update() {
+                    this.x += this.vx;
+                    this.y += this.vy;
+                    this.vy += config.gravity;
+                    this.rotation += this.rotationSpeed;
+
+                    if (this.y > height + 200 || this.x < -200 || this.x > width + 200) {
+                        this.active = false;
+                    }
+                }
+
+                draw() {
+                    ctx.save();
+                    ctx.translate(this.x, this.y);
+                    ctx.rotate(this.rotation);
+                    ctx.font = "60px Segoe UI Emoji";
+                    ctx.textAlign = "center";
+                    ctx.textBaseline = "middle";
+                    ctx.fillStyle = "#fff";
+                    ctx.fillText(this.data.emoji, 0, 5);
+                    ctx.restore();
+                }
+
+                slice() {
+                    if (this.sliced || !this.active) return;
+                    this.sliced = true;
+                    this.active = false;
+
+                    if (this.type === 'bomb') {
+                        createExplosion(this.x, this.y);
+                        document.body.classList.add('shake-effect');
+                        setTimeout(() => {
+                            document.body.classList.remove('shake-effect');
+                        }, 500);
+                        loseLife();
+                    } else {
+                        score += this.data.points;
+                        updateScoreDisplay();
+                        createSliceEffects(this.x, this.y, this.data.color, this.data.emoji);
+                        checkLevelWin();
+                    }
+                }
+            }
+
+            function startLevel(levelIndex) {
+                currentLevelIndex = levelIndex;
+                currentLevelData = levels[currentLevelIndex];
+                score = 0;
+                lives = 3;
+                timeLeft = currentLevelData.duration;
+                entities = [];
+                particles = [];
+                bladePath = [];
+                frameCount = 0;
+                gameRunning = true;
+                isVictory = false; 
+
+                const prefix = translations[currentLang].levelPrefix;
+                levelBadgeEl.innerText = `${prefix} ${currentLevelData.id}`;
+
+                updateScoreDisplay();
+                updateLivesDisplay();
+                updateTimerDisplay();
+                
+                menuScreen.classList.add('hidden');
+                levelClearScreen.classList.add('hidden');
+                gameOverScreen.classList.add('hidden');
+                victoryScreen.classList.add('hidden');
+                document.body.classList.remove('shake-effect');
+
+                if (timerInterval) clearInterval(timerInterval);
+                timerInterval = setInterval(tickTimer, 1000);
+
+                if (animationId) cancelAnimationFrame(animationId);
+                loop();
+            }
+
+            function tickTimer() {
+                if (!gameRunning) return;
+                timeLeft--;
+                updateTimerDisplay();
+                if (timeLeft <= 0) {
+                    if (score >= currentLevelData.target) levelComplete();
+                    else gameOver(false);
+                }
+            }
+
+            function checkLevelWin() {
+                if (score >= currentLevelData.target) levelComplete();
+            }
+
+            function levelComplete() {
+                gameRunning = false;
+                clearInterval(timerInterval);
+                if (currentLevelIndex >= levels.length - 1) {
+                    isVictory = true;
+                    victoryScreen.classList.remove('hidden');
+                } else {
+                    const nextLv = levels[currentLevelIndex + 1];
+                    nextLevelNumEl.innerText = nextLv.id;
+                    nextTargetEl.innerText = nextLv.target;
+                    nextTimeEl.innerText = nextLv.duration + 's';
+                    levelClearScreen.classList.remove('hidden');
+                }
+            }
+
+            function gameOver(isBomb) {
+                gameRunning = false;
+                clearInterval(timerInterval);
+                const prefix = translations[currentLang].levelPrefix;
+                finalLevelEl.innerText = `${prefix} ${currentLevelData.id}`;
+                finalScoreEl.innerText = score;
+                gameOverScreen.classList.remove('hidden');
+                if (isBomb) {
+                    document.body.classList.add('shake-effect');
+                    createExplosion(width/2, height/2);
+                }
+            }
+
+            function loseLife() {
+                lives--;
+                updateLivesDisplay();
+                if (lives <= 0) gameOver(false);
+            }
+
+            function updateScoreDisplay() {
+                scoreValEl.innerText = score;
+                targetValEl.innerText = currentLevelData.target;
+                if (score >= currentLevelData.target) scoreValEl.style.color = '#4dff4d';
+                else scoreValEl.style.color = '#ffd700';
+            }
+
+            function updateLivesDisplay() {
+                let hearts = '';
+                for(let i=0; i<lives; i++) hearts += '❤️';
+                for(let i=lives; i<config.maxLives; i++) hearts += '🖤';
+                livesEl.innerText = hearts;
+            }
+
+            function updateTimerDisplay() {
+                timerEl.innerText = timeLeft;
+                if (timeLeft <= 10) timerEl.classList.add('warning');
+                else timerEl.classList.remove('warning');
+            }
+
+            function createSliceEffects(x, y, color, emoji) {
+                for (let i = 0; i < 15; i++) {
+                    particles.push(new Particle(x, y, color, Math.random() * 5 + 2, Math.random() * 3 + 2));
+                }
+                let p1 = new Particle(x, y, color, 4, 30, true, emoji);
+                p1.vx = -3; p1.vy = -3; p1.rotationSpeed = -0.1;
+                particles.push(p1);
+                let p2 = new Particle(x, y, color, 4, 30, true, emoji);
+                p2.vx = 3; p2.vy = -3;
+                particles.push(p2);
+                
+                particles.push(new Particle(x, y - 30, '#FFD700', 1, 48, true, '+' + fruitsData.find(f=>f.emoji===emoji).points));
+            }
+
+            function createExplosion(x, y) {
+                for (let i = 0; i < 50; i++) {
+                    particles.push(new Particle(x, y, '#fff', Math.random() * 15, Math.random() * 5 + 2));
+                    particles.push(new Particle(x, y, '#ff4444', Math.random() * 10, Math.random() * 4 + 2));
+                }
+            }
+            
+            function createFirework(x, y) {
+                const colors = ['#ff0044', '#00ff44', '#4400ff', '#ffff00', '#00ffff', '#ff00ff', '#ffffff'];
+                const color = colors[Math.floor(Math.random() * colors.length)];
+                for (let i = 0; i < 60; i++) {
+                    let p = new Particle(x, y, color, Math.random() * 6 + 2, Math.random() * 3 + 1);
+                    p.decay = Math.random() * 0.01 + 0.005; p.gravity = 0.05; particles.push(p);
+                }
+            }
+
+            function checkCollisions() {
+                if (bladePath.length < 2) return;
+                const p1 = bladePath[bladePath.length - 2];
+                const p2 = bladePath[bladePath.length - 1];
+                entities.forEach(entity => {
+                    if (!entity.active || entity.sliced) return;
+                    const distSq = (p1.x - entity.x)**2 + (p1.y - entity.y)**2;
+                    if (distSq > 25000) return; 
+                    const dist1 = Math.hypot(p1.x - entity.x, p1.y - entity.y);
+                    const dist2 = Math.hypot(p2.x - entity.x, p2.y - entity.y);
+                    if (dist1 < entity.radius || dist2 < entity.radius) {
+                        entity.slice();
+                    } else {
+                       const step = 5;
+                       const dx = p2.x - p1.x;
+                       const dy = p2.y - p1.y;
+                       const len = Math.hypot(dx, dy);
+                       for(let i=0; i<=len; i+=step) {
+                           const tx = p1.x + (dx/len)*i;
+                           const ty = p1.y + (dy/len)*i;
+                           if(Math.hypot(tx - entity.x, ty - entity.y) < entity.radius) {
+                               entity.slice();
+                               break;
+                           }
+                       }
+                    }
+                });
+            }
+
+            function loop() {
+                ctx.clearRect(0, 0, width, height);
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                for(let i=0; i<width; i+=100) { ctx.moveTo(i,0); ctx.lineTo(i,height); }
+                for(let i=0; i<height; i+=100) { ctx.moveTo(0,i); ctx.lineTo(width,i); }
+                ctx.stroke();
+                
+                if (isVictory) {
+                    if (Math.random() < 0.05) { 
+                        createFirework(Math.random() * width, Math.random() * height * 0.6);
+                    }
+                }
+
+                if (gameRunning) {
+                    frameCount++;
+                    if (frameCount % currentLevelData.spawnRate === 0) {
+                        let batchSize = 1;
+                        if (currentLevelIndex > 2 && Math.random() < 0.4) batchSize = 2;
+                        if (currentLevelIndex > 6 && Math.random() < 0.3) batchSize = 3;
+                        for(let i=0; i<batchSize; i++) {
+                            entities.push(new Entity());
+                        }
+                    }
+                }
+
+                entities = entities.filter(e => e.active);
+                entities.forEach(e => { e.update(); e.draw(); });
+                particles = particles.filter(p => p.alpha > 0);
+                particles.forEach(p => { p.update(); p.draw(); });
+
+                if (bladePath.length > 0) {
+                    bladePath.forEach(p => p.life--);
+                    bladePath = bladePath.filter(p => p.life > 0);
+                    if (bladePath.length > 0) {
+                        ctx.beginPath();
+                        ctx.moveTo(bladePath[0].x, bladePath[0].y);
+                        for (let i = 1; i < bladePath.length; i++) {
+                            ctx.lineTo(bladePath[i].x, bladePath[i].y);
+                        }
+                        
+                        // Optimized Blade: Manual Glow (No shadowBlur)
+                        // 1. Draw outer glow (wide, transparent)
+                        ctx.strokeStyle = "rgba(0, 255, 255, 0.3)";
+                        ctx.lineWidth = config.bladeWidth * 2.5;
+                        ctx.lineCap = 'round';
+                        ctx.lineJoin = 'round';
+                        ctx.stroke();
+
+                        // 2. Draw inner core (thin, solid)
+                        ctx.strokeStyle = config.bladeColor; // '#00ffff'
+                        ctx.lineWidth = config.bladeWidth;
+                        ctx.stroke();
+                    }
+                }
+                animationId = requestAnimationFrame(loop);
+            }
+
+            function addPathPoint(x, y) {
+                bladePath.push(new Point(x, y));
+                if(gameRunning) checkCollisions();
+            }
+            
+            let isMouseDown = false;
+            window.addEventListener('mousedown', (e) => {
+                if (e.target.tagName === 'BUTTON') return;
+                isMouseDown = true;
+                bladePath = [];
+                addPathPoint(e.clientX, e.clientY);
+            });
+            window.addEventListener('mousemove', (e) => {
+                if (isMouseDown) addPathPoint(e.clientX, e.clientY);
+            });
+            window.addEventListener('mouseup', () => { isMouseDown = false; bladePath = []; });
+            window.addEventListener('touchstart', (e) => {
+                if (e.target.tagName === 'BUTTON') return;
+                for (let i = 0; i < e.changedTouches.length; i++) {
+                    bladePath = []; 
+                    addPathPoint(e.changedTouches[i].clientX, e.changedTouches[i].clientY);
+                }
+            }, {passive: false});
+            window.addEventListener('touchmove', (e) => {
+                e.preventDefault(); 
+                for (let i = 0; i < e.changedTouches.length; i++) {
+                    addPathPoint(e.changedTouches[i].clientX, e.changedTouches[i].clientY);
+                }
+            }, {passive: false});
+            window.addEventListener('touchend', () => { bladePath = []; });
+
+            startBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                startLevel(0); 
+            });
+            nextLevelBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                startLevel(currentLevelIndex + 1);
+            });
+            restartBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                startLevel(0); 
+            });
+            homeBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                gameOverScreen.classList.add('hidden');
+                menuScreen.classList.remove('hidden');
+            });
+            // New level home listener
+            levelHomeBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                levelClearScreen.classList.add('hidden');
+                menuScreen.classList.remove('hidden');
+            });
+            victoryBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                startLevel(0);
+            });
+        })();
+    </script>
+</body>
+</html>
