@@ -245,7 +245,7 @@
 
         /* Show lock screen only in portrait */
         @media screen and (orientation: portrait) {
-            #orientation-lock { display: flex; }
+            /* #orientation-lock { display: flex; } */
         }
 
         h1 {
@@ -419,15 +419,6 @@
 </head>
 <body>
 
-    <!-- Orientation Lock Screen -->
-    <div id="orientation-lock">
-        <div class="rotate-icon">📱 ↻</div>
-        <h2>Please Rotate Your Device</h2>
-        <p>This game is best played in landscape mode.</p>
-        <p>请旋转手机以横屏游玩</p>
-        <button id="enter-landscape-btn" class="lock-btn">Enter Landscape / 进入横屏</button>
-    </div>
-
     <!-- Main Game Container -->
     <div id="game-container">
         <canvas id="gameCanvas"></canvas>
@@ -437,7 +428,7 @@
 
         <div id="ui-layer">
             <div class="hud-top">
-                <div class="hud-column" style="margin-top: 40px;">
+                <div class="hud-column">
                     <div class="level-badge" id="level-badge">Level 1</div>
                     <div class="score-box">
                         <span data-t="scoreLabel">Score</span>: 
@@ -445,9 +436,9 @@
                     </div>
                 </div>
                 
-                <div class="timer-box" id="timer" style="margin-top: 10px;">60</div>
+                <div class="timer-box" id="timer">60</div>
 
-                <div class="hud-column" style="align-items: flex-end; margin-top: 40px;">
+                <div class="hud-column" style="align-items: flex-end;">
                     <div class="lives-box" id="lives">❤️❤️❤️</div>
                 </div>
             </div>
@@ -657,8 +648,6 @@
             const homeBtn = document.getElementById('home-btn');
             const levelHomeBtn = document.getElementById('level-home-btn'); 
             const victoryBtn = document.getElementById('victory-btn');
-            const enterLandscapeBtn = document.getElementById('enter-landscape-btn');
-            const orientationLockDiv = document.getElementById('orientation-lock');
 
             const videoInput = document.getElementById('video-input');
             const cameraPreview = document.getElementById('camera-preview');
@@ -690,26 +679,6 @@
             let handResults = null;
             let hands = null;
             let camera = null;
-
-            if (enterLandscapeBtn) {
-                enterLandscapeBtn.addEventListener('click', async (e) => {
-                    e.stopPropagation();
-                    try {
-                        if (document.documentElement.requestFullscreen) {
-                            await document.documentElement.requestFullscreen();
-                        } else if (document.documentElement.webkitRequestFullscreen) {
-                            await document.documentElement.webkitRequestFullscreen();
-                        }
-                        if (screen.orientation && screen.orientation.lock) {
-                            await screen.orientation.lock('landscape');
-                        }
-                        orientationLockDiv.style.display = 'none';
-                    } catch (err) {
-                        console.error("Landscape lock failed:", err);
-                        alert("无法自动切换，请手动关闭屏幕旋转锁定并横置手机。\nAuto-rotate failed. Please disable orientation lock manually.");
-                    }
-                });
-            }
 
             window.setLang = function(lang) {
                 currentLang = lang;
@@ -899,48 +868,72 @@
                     let spawnX, spawnY, velocityX, velocityY;
 
                     if (rand < 0.30) {
-                        spawnX = -this.radius;
-                        spawnY = h * (0.5 + Math.random() * 0.4); 
-                        const targetPeakY = h * (0.1 + Math.random() * 0.2); 
+                        // 1. Left (Low Arc: Peak <= Top) - Start at bottom-left corner area
+                        spawnX = w * (Math.random() * 0.25); // Start within left 25%
+                        spawnY = h + this.radius; // Below screen
+                        
+                        // Target a peak within 15%-40% from top
+                        const targetPeakY = h * (0.15 + Math.random() * 0.25); 
                         const heightDelta = spawnY - targetPeakY;
                         velocityY = -Math.sqrt(2 * g * heightDelta);
+                        
+                        // Calculate time to land at height h (ground)
                         const airTime = 2 * (Math.abs(velocityY) / g);
-                        velocityX = (w * (0.5 + Math.random() * 0.3)) / airTime;
+                        // Land on right side (width * 0.6 to width)
+                        const targetX = w * (0.6 + Math.random() * 0.4);
+                        velocityX = (targetX - spawnX) / airTime;
 
                     } else if (rand < 0.45) {
-                        spawnX = -this.radius;
-                        spawnY = h * (0.5 + Math.random() * 0.4);
-                        const targetPeakY = -h * (0.1 + Math.random() * 0.2);
+                        // 2. Left (High Arc: Peak > Top)
+                        spawnX = w * (Math.random() * 0.25);
+                        spawnY = h + this.radius;
+                        
+                        // Target peak ABOVE screen (negative Y)
+                        const targetPeakY = -h * (0.05 + Math.random() * 0.15);
                         const heightDelta = spawnY - targetPeakY;
                         velocityY = -Math.sqrt(2 * g * heightDelta);
+                        
                         const airTime = 2 * (Math.abs(velocityY) / g);
-                        velocityX = (w * (0.6 + Math.random() * 0.4)) / airTime;
+                        const targetX = w * (0.6 + Math.random() * 0.4);
+                        velocityX = (targetX - spawnX) / airTime;
 
                     } else if (rand < 0.75) {
-                        spawnX = w + this.radius;
-                        spawnY = h * (0.5 + Math.random() * 0.4);
-                        const targetPeakY = h * (0.1 + Math.random() * 0.2);
+                        // 3. Right (Low Arc: Peak <= Top) - Start at bottom-right corner area
+                        spawnX = w * (0.75 + Math.random() * 0.25); // Start within right 25%
+                        spawnY = h + this.radius;
+                        
+                        const targetPeakY = h * (0.15 + Math.random() * 0.25);
                         const heightDelta = spawnY - targetPeakY;
                         velocityY = -Math.sqrt(2 * g * heightDelta);
+                        
                         const airTime = 2 * (Math.abs(velocityY) / g);
-                        velocityX = -(w * (0.5 + Math.random() * 0.3)) / airTime;
+                        // Land on left side (0 to width * 0.4)
+                        const targetX = w * (Math.random() * 0.4);
+                        velocityX = (targetX - spawnX) / airTime;
 
                     } else if (rand < 0.90) {
-                        spawnX = w + this.radius;
-                        spawnY = h * (0.5 + Math.random() * 0.4);
-                        const targetPeakY = -h * (0.1 + Math.random() * 0.2);
+                        // 4. Right (High Arc: Peak > Top)
+                        spawnX = w * (0.75 + Math.random() * 0.25);
+                        spawnY = h + this.radius;
+                        
+                        const targetPeakY = -h * (0.05 + Math.random() * 0.15);
                         const heightDelta = spawnY - targetPeakY;
                         velocityY = -Math.sqrt(2 * g * heightDelta);
+                        
                         const airTime = 2 * (Math.abs(velocityY) / g);
-                        velocityX = -(w * (0.6 + Math.random() * 0.4)) / airTime;
+                        const targetX = w * (Math.random() * 0.4);
+                        velocityX = (targetX - spawnX) / airTime;
 
                     } else {
-                        spawnX = w * (0.2 + Math.random() * 0.6);
+                        // 5. Bottom Center -> Up
+                        spawnX = w * (0.3 + Math.random() * 0.4); // Center 40%
                         spawnY = h + this.radius;
-                        const targetPeakY = h * (0.15 + Math.random() * 0.2);
+                        
+                        const targetPeakY = h * (0.2 + Math.random() * 0.3);
                         const heightDelta = spawnY - targetPeakY;
                         velocityY = -Math.sqrt(2 * g * heightDelta);
-                        velocityX = (Math.random() - 0.5) * 4;
+                        // Small horizontal drift
+                        velocityX = (Math.random() - 0.5) * 3;
                     }
 
                     this.x = spawnX;
